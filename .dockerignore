@@ -1,0 +1,11 @@
+.git
+.github
+.specify
+.vscode
+specs
+*.md
+.gitignore
+.dockerignore
+.DS_Store
+.env
+.env.*
