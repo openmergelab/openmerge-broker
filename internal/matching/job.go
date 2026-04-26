@@ -13,7 +13,7 @@ import (
 
 const h3KRingRadius = 5
 
-// Introducer creates a Discord channel and sends the intro message.
+// Introducer sends Telegram DMs to introduce matched users.
 // Nil means introductions are disabled (no bot token configured).
 type Introducer interface {
 	Introduce(ctx context.Context, matchID string) error
@@ -30,7 +30,7 @@ func NewJob(s store.SignalStore, logger *slog.Logger, introducer Introducer) *Jo
 	return &Job{store: s, logger: logger, introducer: introducer}
 }
 
-// introduceAsync fires off the Discord introduction in a background goroutine.
+// introduceAsync fires off the Telegram introduction in a background goroutine.
 func (j *Job) introduceAsync(matchID string) {
 	if j.introducer == nil {
 		return
@@ -156,16 +156,16 @@ type Pair struct {
 	B model.UnmatchedSignal
 }
 
-// RetryMissingChannels finds matches that have no Discord channel yet (both
-// users are now server members) and retries the introduction.
-func (j *Job) RetryMissingChannels(ctx context.Context) error {
+// RetryMissingIntros finds matches that haven't been introduced yet
+// (both users now have Telegram IDs) and retries the introduction.
+func (j *Job) RetryMissingIntros(ctx context.Context) error {
 	if j.introducer == nil {
 		return nil
 	}
 
-	matches, err := j.store.GetMatchesMissingChannel(ctx)
+	matches, err := j.store.GetMatchesMissingIntro(ctx)
 	if err != nil {
-		return fmt.Errorf("get matches missing channel: %w", err)
+		return fmt.Errorf("get matches missing intro: %w", err)
 	}
 
 	for _, m := range matches {

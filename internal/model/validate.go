@@ -70,9 +70,9 @@ func ValidateSignalRequest(r *SignalRequest) []string {
 		invalid = append(invalid, "encryptedVector")
 	}
 
-	// V-007: discordIdHash must be 64-character hex string
-	if !hex64Re.MatchString(r.DiscordIDHash) {
-		invalid = append(invalid, "discordIdHash")
+	// V-007: telegramIdHash must be 64-character hex string
+	if !hex64Re.MatchString(r.TelegramIDHash) {
+		invalid = append(invalid, "telegramIdHash")
 	}
 
 	// V-008 & V-009: handled at parse level (JSON decode) and unknown fields ignored

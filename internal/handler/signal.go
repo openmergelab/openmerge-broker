@@ -57,7 +57,7 @@ func (h *SignalHandler) HandleUpsertSignal(w http.ResponseWriter, r *http.Reques
 		AgeMax:          req.AgeRange.Max,
 		PublicKey:       req.PublicKey,
 		EncryptedVector: encVec,
-		DiscordIDHash:   req.DiscordIDHash,
+		TelegramIDHash:  req.TelegramIDHash,
 		PushToken:       req.PushToken,
 		CreatedAt:       now,
 		ExpiresAt:       now.Add(h.ttl),

@@ -27,10 +27,10 @@ func NewPostgresStore(pool *pgxpool.Pool, ttl time.Duration) *PostgresStore {
 func (s *PostgresStore) UpsertSignal(ctx context.Context, signal *model.Signal) error {
 	// Ensure user row exists (FK constraint)
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO users (anonymous_id, discord_id_hash, discord_id)
+		INSERT INTO users (anonymous_id, telegram_id_hash, telegram_id)
 		VALUES ($1, $2, $2)
 		ON CONFLICT (anonymous_id) DO NOTHING
-	`, signal.AnonymousID, signal.DiscordIDHash)
+	`, signal.AnonymousID, signal.TelegramIDHash)
 	if err != nil {
 		return err
 	}
@@ -77,7 +77,7 @@ func (s *PostgresStore) GetSignalByID(ctx context.Context, signalID string) (*mo
 		SELECT s.signal_id, s.anonymous_id, s.location_h3, s.seeking,
 		       s.age_min, s.age_max, s.preference_vector, s.public_key,
 		       s.matched, s.created_at, s.expires_at,
-		       u.discord_id_hash, u.push_token
+		       u.telegram_id_hash, u.push_token
 		FROM agent_signals s
 		JOIN users u ON u.anonymous_id = s.anonymous_id
 		WHERE s.signal_id = $1 AND s.expires_at > NOW()
@@ -91,7 +91,7 @@ func (s *PostgresStore) GetSignalByAnonID(ctx context.Context, anonymousID strin
 		SELECT s.signal_id, s.anonymous_id, s.location_h3, s.seeking,
 		       s.age_min, s.age_max, s.preference_vector, s.public_key,
 		       s.matched, s.created_at, s.expires_at,
-		       u.discord_id_hash, u.push_token
+		       u.telegram_id_hash, u.push_token
 		FROM agent_signals s
 		JOIN users u ON u.anonymous_id = s.anonymous_id
 		WHERE s.anonymous_id = $1 AND s.expires_at > NOW()
@@ -119,7 +119,7 @@ func (s *PostgresStore) FindSignalsByH3Cells(ctx context.Context, cells []string
 	rows, err := s.pool.Query(ctx, `
 		SELECT s.anonymous_id, s.location_h3, s.seeking,
 		       s.age_min, s.age_max, s.preference_vector, s.public_key,
-		       u.discord_id_hash
+		       u.telegram_id_hash
 		FROM agent_signals s
 		JOIN users u ON u.anonymous_id = s.anonymous_id
 		WHERE s.location_h3 = ANY($1) AND s.expires_at > NOW() AND s.matched = false
@@ -136,7 +136,7 @@ func (s *PostgresStore) FindSignalsByH3Cells(ctx context.Context, cells []string
 		if err := rows.Scan(
 			&r.AnonymousID, &r.LocationH3, &r.Seeking,
 			&r.AgeMin, &r.AgeMax, &prefVec, &r.PublicKey,
-			&r.DiscordIDHash,
+			&r.TelegramIDHash,
 		); err != nil {
 			return nil, err
 		}
@@ -167,7 +167,7 @@ func (s *PostgresStore) scanSignal(row pgx.Row) (*model.Signal, error) {
 		&sig.SignalID, &sig.AnonymousID, &sig.LocationH3, &sig.Seeking,
 		&sig.AgeMin, &sig.AgeMax, &prefVec, &sig.PublicKey,
 		&sig.Matched, &sig.CreatedAt, &sig.ExpiresAt,
-		&sig.DiscordIDHash, &sig.PushToken,
+		&sig.TelegramIDHash, &sig.PushToken,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -181,7 +181,7 @@ func (s *PostgresStore) scanSignal(row pgx.Row) (*model.Signal, error) {
 
 func (s *PostgresStore) GetMatchesForUser(ctx context.Context, anonymousID string) ([]model.Match, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, user_a, user_b, discord_channel_id, created_at
+		SELECT id, user_a, user_b, intro_channel_id, created_at
 		FROM   matches
 		WHERE  user_a = $1 OR user_b = $1
 		ORDER  BY created_at DESC
@@ -194,7 +194,7 @@ func (s *PostgresStore) GetMatchesForUser(ctx context.Context, anonymousID strin
 	var matches []model.Match
 	for rows.Next() {
 		var m model.Match
-		if err := rows.Scan(&m.ID, &m.UserA, &m.UserB, &m.DiscordChannelID, &m.CreatedAt); err != nil {
+		if err := rows.Scan(&m.ID, &m.UserA, &m.UserB, &m.IntroChannelID, &m.CreatedAt); err != nil {
 			return nil, err
 		}
 		matches = append(matches, m)
@@ -215,48 +215,42 @@ func (s *PostgresStore) SignalActive(ctx context.Context, anonymousID string) (b
 	return exists, err
 }
 
-func (s *PostgresStore) EnsureUser(ctx context.Context, anonymousID string, discordIDHash string) (string, error) {
-	// Try to find existing user by discord_id_hash first.
-	// If found, update last_seen and return the existing anonymous_id
-	// (the caller may have sent a fresh anonymous_id from a new install).
+func (s *PostgresStore) EnsureUser(ctx context.Context, anonymousID string, telegramIDHash string) (string, error) {
 	var resolved string
 	err := s.pool.QueryRow(ctx, `
-		INSERT INTO users (anonymous_id, discord_id_hash, discord_id)
+		INSERT INTO users (anonymous_id, telegram_id_hash, telegram_id)
 		VALUES ($1, $2, $2)
-		ON CONFLICT (discord_id_hash) DO UPDATE
+		ON CONFLICT (telegram_id_hash) DO UPDATE
 			SET last_seen = NOW()
 		RETURNING anonymous_id
-	`, anonymousID, discordIDHash).Scan(&resolved)
+	`, anonymousID, telegramIDHash).Scan(&resolved)
 	return resolved, err
 }
 
-// EnsureUserFromDiscord is like EnsureUser but stores the real discord_id and handle.
-// Used by the /auth/discord endpoint where the broker exchanges the OAuth code
-// server-side and therefore has the real Discord identity.
-func (s *PostgresStore) EnsureUserFromDiscord(ctx context.Context, anonymousID, discordIDHash, discordID, discordHandle string) (string, error) {
+// EnsureUserFromTelegram is like EnsureUser but stores the real telegram_id and handle.
+func (s *PostgresStore) EnsureUserFromTelegram(ctx context.Context, anonymousID, telegramIDHash, telegramID, telegramHandle string) (string, error) {
 	var resolved string
 	err := s.pool.QueryRow(ctx, `
-		INSERT INTO users (anonymous_id, discord_id_hash, discord_id, discord_handle)
+		INSERT INTO users (anonymous_id, telegram_id_hash, telegram_id, telegram_handle)
 		VALUES ($1, $2, $3, $4)
-		ON CONFLICT (discord_id_hash) DO UPDATE
-			SET discord_id = EXCLUDED.discord_id,
-			    discord_handle = EXCLUDED.discord_handle,
+		ON CONFLICT (telegram_id_hash) DO UPDATE
+			SET telegram_id = EXCLUDED.telegram_id,
+			    telegram_handle = EXCLUDED.telegram_handle,
 			    last_seen = NOW()
 		RETURNING anonymous_id
-	`, anonymousID, discordIDHash, discordID, discordHandle).Scan(&resolved)
+	`, anonymousID, telegramIDHash, telegramID, telegramHandle).Scan(&resolved)
 	return resolved, err
 }
 
 func (s *PostgresStore) GetUnmatchedSignals(ctx context.Context) ([]model.UnmatchedSignal, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT s.anonymous_id, s.location_h3, s.gender, s.seeking,
-		       s.age, s.age_min, s.age_max, u.discord_id,
-		       COALESCE(u.discord_handle, '')
+		       s.age, s.age_min, s.age_max, u.telegram_id,
+		       COALESCE(u.telegram_handle, '')
 		FROM   agent_signals s
 		JOIN   users u ON u.anonymous_id = s.anonymous_id
 		WHERE  s.matched    = false
 		AND    s.expires_at > NOW()
-		-- TODO: Add AND u.age_verified = true when verification feature ships
 		ORDER  BY s.created_at ASC
 	`)
 	if err != nil {
@@ -269,8 +263,8 @@ func (s *PostgresStore) GetUnmatchedSignals(ctx context.Context) ([]model.Unmatc
 		var sig model.UnmatchedSignal
 		if err := rows.Scan(
 			&sig.AnonymousID, &sig.LocationH3, &sig.Gender, &sig.Seeking,
-			&sig.Age, &sig.AgeMin, &sig.AgeMax, &sig.DiscordID,
-			&sig.DiscordHandle,
+			&sig.Age, &sig.AgeMin, &sig.AgeMax, &sig.TelegramID,
+			&sig.TelegramHandle,
 		); err != nil {
 			return nil, err
 		}
@@ -286,13 +280,13 @@ func (s *PostgresStore) MarkSignalsMatched(ctx context.Context, idA, idB string)
 	return err
 }
 
-func (s *PostgresStore) CreateMatch(ctx context.Context, userA, userB, discordChannelID string) (string, error) {
+func (s *PostgresStore) CreateMatch(ctx context.Context, userA, userB, channelID string) (string, error) {
 	var matchID string
 	err := s.pool.QueryRow(ctx, `
-		INSERT INTO matches (user_a, user_b, discord_channel_id)
+		INSERT INTO matches (user_a, user_b, intro_channel_id)
 		VALUES ($1, $2, $3)
 		RETURNING id
-	`, userA, userB, discordChannelID).Scan(&matchID)
+	`, userA, userB, channelID).Scan(&matchID)
 	return matchID, err
 }
 
@@ -303,37 +297,36 @@ func (s *PostgresStore) CleanExpiredVerifications(ctx context.Context) error {
 	return err
 }
 
-func (s *PostgresStore) GetMatchUsersDiscord(ctx context.Context, matchID string) (discordIDA, discordIDB, handleA, handleB string, bothMembers bool, err error) {
+func (s *PostgresStore) GetMatchUsersTelegram(ctx context.Context, matchID string) (telegramIDA, telegramIDB, handleA, handleB string, err error) {
 	err = s.pool.QueryRow(ctx, `
-		SELECT ua.discord_id, ub.discord_id,
-		       COALESCE(ua.discord_handle, ''), COALESCE(ub.discord_handle, ''),
-		       (ua.server_member AND ub.server_member)
+		SELECT ua.telegram_id, ub.telegram_id,
+		       COALESCE(ua.telegram_handle, ''), COALESCE(ub.telegram_handle, '')
 		FROM   matches m
 		JOIN   users ua ON ua.anonymous_id = m.user_a
 		JOIN   users ub ON ub.anonymous_id = m.user_b
 		WHERE  m.id = $1
-	`, matchID).Scan(&discordIDA, &discordIDB, &handleA, &handleB, &bothMembers)
+	`, matchID).Scan(&telegramIDA, &telegramIDB, &handleA, &handleB)
 	return
 }
 
 func (s *PostgresStore) UpdateMatchChannel(ctx context.Context, matchID, channelID string) error {
 	_, err := s.pool.Exec(ctx, `
-		UPDATE matches SET discord_channel_id = $2 WHERE id = $1
+		UPDATE matches SET intro_channel_id = $2 WHERE id = $1
 	`, matchID, channelID)
 	return err
 }
 
-func (s *PostgresStore) GetMatchesMissingChannel(ctx context.Context) ([]model.MatchWithUsers, error) {
+func (s *PostgresStore) GetMatchesMissingIntro(ctx context.Context) ([]model.MatchWithUsers, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT m.id, m.user_a, m.user_b,
-		       ua.discord_id, ub.discord_id,
-		       COALESCE(ua.discord_handle, ''), COALESCE(ub.discord_handle, '')
+		       ua.telegram_id, ub.telegram_id,
+		       COALESCE(ua.telegram_handle, ''), COALESCE(ub.telegram_handle, '')
 		FROM   matches m
 		JOIN   users ua ON ua.anonymous_id = m.user_a
 		JOIN   users ub ON ub.anonymous_id = m.user_b
-		WHERE  m.discord_channel_id = ''
-		AND    ua.server_member = true
-		AND    ub.server_member = true
+		WHERE  m.introduced = false
+		AND    ua.telegram_id != ''
+		AND    ub.telegram_id != ''
 		ORDER  BY m.created_at ASC
 	`)
 	if err != nil {
@@ -346,7 +339,7 @@ func (s *PostgresStore) GetMatchesMissingChannel(ctx context.Context) ([]model.M
 		var m model.MatchWithUsers
 		if err := rows.Scan(
 			&m.MatchID, &m.UserA, &m.UserB,
-			&m.DiscordIDA, &m.DiscordIDB,
+			&m.TelegramIDA, &m.TelegramIDB,
 			&m.HandleA, &m.HandleB,
 		); err != nil {
 			return nil, err
@@ -356,10 +349,10 @@ func (s *PostgresStore) GetMatchesMissingChannel(ctx context.Context) ([]model.M
 	return results, rows.Err()
 }
 
-func (s *PostgresStore) SetServerMember(ctx context.Context, discordID string, handle string) error {
+func (s *PostgresStore) MarkMatchIntroduced(ctx context.Context, matchID string) error {
 	_, err := s.pool.Exec(ctx, `
-		UPDATE users SET server_member = true, discord_handle = $2 WHERE discord_id = $1
-	`, discordID, handle)
+		UPDATE matches SET introduced = true WHERE id = $1
+	`, matchID)
 	return err
 }
 
@@ -381,8 +374,8 @@ func (s *PostgresStore) MarkAgeVerified(ctx context.Context, anonymousID, provid
 func (s *PostgresStore) FindCandidatesForSignal(ctx context.Context, signal *model.Signal, h3Cells []string) ([]model.UnmatchedSignal, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT s.anonymous_id, s.location_h3, s.gender, s.seeking,
-		       s.age, s.age_min, s.age_max, u.discord_id,
-		       COALESCE(u.discord_handle, '')
+		       s.age, s.age_min, s.age_max, u.telegram_id,
+		       COALESCE(u.telegram_handle, '')
 		FROM   agent_signals s
 		JOIN   users u ON u.anonymous_id = s.anonymous_id
 		WHERE  s.matched    = false
@@ -408,8 +401,8 @@ func (s *PostgresStore) FindCandidatesForSignal(ctx context.Context, signal *mod
 		var c model.UnmatchedSignal
 		if err := rows.Scan(
 			&c.AnonymousID, &c.LocationH3, &c.Gender, &c.Seeking,
-			&c.Age, &c.AgeMin, &c.AgeMax, &c.DiscordID,
-			&c.DiscordHandle,
+			&c.Age, &c.AgeMin, &c.AgeMax, &c.TelegramID,
+			&c.TelegramHandle,
 		); err != nil {
 			return nil, err
 		}
@@ -420,14 +413,14 @@ func (s *PostgresStore) FindCandidatesForSignal(ctx context.Context, signal *mod
 
 // CreateMatchIfNotExists inserts a match only if the pair doesn't already exist.
 // Returns the match ID, whether it was newly created, and any error.
-func (s *PostgresStore) CreateMatchIfNotExists(ctx context.Context, userA, userB, discordChannelID string) (string, bool, error) {
+func (s *PostgresStore) CreateMatchIfNotExists(ctx context.Context, userA, userB, channelID string) (string, bool, error) {
 	var matchID string
 	err := s.pool.QueryRow(ctx, `
-		INSERT INTO matches (user_a, user_b, discord_channel_id)
+		INSERT INTO matches (user_a, user_b, intro_channel_id)
 		VALUES ($1, $2, $3)
 		ON CONFLICT (LEAST(user_a, user_b), GREATEST(user_a, user_b)) DO NOTHING
 		RETURNING id
-	`, userA, userB, discordChannelID).Scan(&matchID)
+	`, userA, userB, channelID).Scan(&matchID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			// Already exists — not an error, just a no-op

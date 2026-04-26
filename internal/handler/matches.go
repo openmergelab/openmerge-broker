@@ -47,7 +47,7 @@ func (h *MatchHandler) HandleGetMatches(w http.ResponseWriter, r *http.Request) 
 		resp = append(resp, model.MatchResponse{
 			MatchID:          m.ID,
 			PartnerID:        partner,
-			DiscordChannelID: m.DiscordChannelID,
+			IntroChannelID: m.IntroChannelID,
 			IntroducedAt:     m.CreatedAt.Format(time.RFC3339),
 		})
 	}

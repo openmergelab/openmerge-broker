@@ -21,14 +21,13 @@ type Config struct {
 	MatchInterval   time.Duration
 	CleanupInterval time.Duration
 
-	// Discord (optional — leave empty to disable introductions)
-	DiscordBotToken         string
-	DiscordGuildID          string
-	DiscordOnboardChannelID string
+	// Telegram (optional — leave empty to disable introductions and auth)
+	TelegramBotToken     string
+	TelegramClientID     string
+	TelegramClientSecret string
 
-	// Discord OAuth (optional — leave empty to disable /auth/discord)
-	DiscordClientID     string
-	DiscordClientSecret string
+	// Public URL for OAuth redirects (e.g. https://broker.example.com)
+	PublicURL string
 }
 
 func Load() (*Config, error) {
@@ -56,12 +55,11 @@ func Load() (*Config, error) {
 		MatchInterval:   parseDuration("BROKER_MATCH_INTERVAL", 6*time.Hour),
 		CleanupInterval: parseDuration("BROKER_CLEANUP_INTERVAL", 1*time.Hour),
 
-		DiscordBotToken:         os.Getenv("DISCORD_BOT_TOKEN"),
-		DiscordGuildID:          os.Getenv("DISCORD_GUILD_ID"),
-		DiscordOnboardChannelID: os.Getenv("DISCORD_ONBOARD_CHANNEL_ID"),
+		TelegramBotToken:     os.Getenv("TELEGRAM_BOT_TOKEN"),
+		TelegramClientID:     os.Getenv("TELEGRAM_CLIENT_ID"),
+		TelegramClientSecret: os.Getenv("TELEGRAM_CLIENT_SECRET"),
 
-		DiscordClientID:     os.Getenv("DISCORD_CLIENT_ID"),
-		DiscordClientSecret: os.Getenv("DISCORD_CLIENT_SECRET"),
+		PublicURL: os.Getenv("BROKER_PUBLIC_URL"),
 	}
 
 	return cfg, nil

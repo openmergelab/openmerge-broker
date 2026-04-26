@@ -13,7 +13,7 @@ type Signal struct {
 	AgeMax           int       `json:"ageMax"`
 	PublicKey        string    `json:"publicKey"`
 	EncryptedVector  []byte    `json:"encryptedVector,omitempty"`
-	DiscordIDHash    string    `json:"discordIdHash,omitempty"`
+	TelegramIDHash   string    `json:"telegramIdHash,omitempty"`
 	PushToken        *string   `json:"pushToken,omitempty"`
 	Matched          bool      `json:"matched"`
 	CreatedAt        time.Time `json:"createdAt"`
@@ -34,7 +34,7 @@ type SignalRequest struct {
 	AgeRange        AgeRange `json:"ageRange"`
 	PublicKey       string   `json:"publicKey"`
 	EncryptedVector string   `json:"encryptedVector"`
-	DiscordIDHash   string   `json:"discordIdHash"`
+	TelegramIDHash  string   `json:"telegramIdHash"`
 	PushToken       *string  `json:"pushToken,omitempty"`
 }
 
@@ -57,7 +57,7 @@ type DiscoveryResult struct {
 	AgeMax          int    `json:"ageMax"`
 	PublicKey       string `json:"publicKey"`
 	EncryptedVector []byte `json:"encryptedVector,omitempty"`
-	DiscordIDHash   string `json:"discordIdHash,omitempty"`
+	TelegramIDHash  string `json:"telegramIdHash,omitempty"`
 }
 
 // UnmatchedSignal is the projection used by the matching job.
@@ -70,17 +70,17 @@ type UnmatchedSignal struct {
 	Age           int
 	AgeMin        int
 	AgeMax        int
-	DiscordID     string
-	DiscordHandle string
+	TelegramID     string
+	TelegramHandle string
 }
 
-// MatchWithUsers is used by the retry job to backfill missing Discord channels.
+// MatchWithUsers is used by the retry job to backfill missing introductions.
 type MatchWithUsers struct {
 	MatchID    string
 	UserA      string
 	UserB      string
-	DiscordIDA string
-	DiscordIDB string
+	TelegramIDA string
+	TelegramIDB string
 	HandleA    string
 	HandleB    string
 }
@@ -89,15 +89,15 @@ type Match struct {
 	ID               string    `json:"-"`
 	UserA            string    `json:"-"`
 	UserB            string    `json:"-"`
-	DiscordChannelID string    `json:"-"`
+	IntroChannelID   string    `json:"-"`
 	CreatedAt        time.Time `json:"-"`
 }
 
 type MatchResponse struct {
-	MatchID          string `json:"matchId"`
-	PartnerID        string `json:"partnerId"`
-	DiscordChannelID string `json:"discordChannelId"`
-	IntroducedAt     string `json:"introducedAt"`
+	MatchID        string `json:"matchId"`
+	PartnerID      string `json:"partnerId"`
+	IntroChannelID string `json:"introChannelId"`
+	IntroducedAt   string `json:"introducedAt"`
 }
 
 type MatchesEnvelope struct {

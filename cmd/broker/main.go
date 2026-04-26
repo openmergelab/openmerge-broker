@@ -12,11 +12,11 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-merge/broker/internal/config"
-	"github.com/open-merge/broker/internal/discord"
 	"github.com/open-merge/broker/internal/handler"
 	"github.com/open-merge/broker/internal/matching"
 	"github.com/open-merge/broker/internal/middleware"
 	"github.com/open-merge/broker/internal/store"
+	"github.com/open-merge/broker/internal/telegram"
 )
 
 func main() {
@@ -47,21 +47,21 @@ func main() {
 
 	signalStore := store.NewPostgresStore(pool, cfg.SignalTTL)
 
-	// Discord integration (optional — nil client disables introductions)
-	discordClient := discord.New(cfg.DiscordBotToken, cfg.DiscordGuildID, cfg.DiscordOnboardChannelID)
+	// Telegram integration (optional — nil client disables introductions)
+	telegramClient := telegram.New(cfg.TelegramBotToken)
 	var introducer matching.Introducer
-	if intro := discord.NewIntroducer(discordClient, signalStore, logger); intro != nil {
+	if intro := telegram.NewIntroducer(telegramClient, signalStore, logger); intro != nil {
 		introducer = intro
-		slog.Info("discord introductions enabled")
+		slog.Info("telegram introductions enabled")
 	} else {
-		slog.Info("discord introductions disabled (no DISCORD_BOT_TOKEN)")
+		slog.Info("telegram introductions disabled (no TELEGRAM_BOT_TOKEN)")
 	}
 
 	matchJob := matching.NewJob(signalStore, logger, introducer)
 	signalHandler := handler.NewSignalHandler(signalStore, cfg.SignalTTL, matchJob)
 	discoveryHandler := handler.NewDiscoveryHandler(signalStore)
 	matchHandler := handler.NewMatchHandler(signalStore)
-	authHandler := handler.NewAuthHandler(signalStore, cfg.AuthSecret, discordClient, cfg.DiscordClientID, cfg.DiscordClientSecret)
+	authHandler := handler.NewAuthHandler(signalStore, cfg.AuthSecret, telegramClient, cfg.TelegramClientID, cfg.TelegramClientSecret, cfg.PublicURL)
 	healthHandler := handler.NewHealthHandler(signalStore)
 	rateLimiter := middleware.NewRateLimiter(cfg.RateLimit)
 
@@ -76,7 +76,10 @@ func main() {
 	r.Get("/healthz", healthHandler.HandleHealthz)
 	r.Get("/readyz", healthHandler.HandleReadyz)
 	r.Post("/auth/session", authHandler.HandleCreateSession)
-	r.Post("/auth/discord", authHandler.HandleDiscordAuth)
+	r.Post("/auth/telegram", authHandler.HandleTelegramAuth)
+	r.Post("/auth/telegram/start", authHandler.HandleTelegramStart)
+	r.Get("/auth/telegram/callback", authHandler.HandleTelegramCallback)
+	r.Get("/auth/telegram/poll", authHandler.HandleTelegramPoll)
 
 	// Authenticated routes
 	r.Group(func(r chi.Router) {
@@ -101,6 +104,7 @@ func main() {
 
 	// Scheduler: matching + cleanup
 	go runScheduler(ctx, matchJob, signalStore, cfg, logger)
+	authHandler.StartCleanup()
 
 	go func() {
 		slog.Info("broker starting", "addr", cfg.ListenAddr)
@@ -151,8 +155,8 @@ func runScheduler(ctx context.Context, matchJob *matching.Job, signalStore store
 			if err := signalStore.CleanExpiredVerifications(ctx); err != nil {
 				logger.Error("verification cleanup failed", "error", err)
 			}
-			if err := matchJob.RetryMissingChannels(ctx); err != nil {
-				logger.Error("retry missing channels failed", "error", err)
+			if err := matchJob.RetryMissingIntros(ctx); err != nil {
+				logger.Error("retry missing intros failed", "error", err)
 			}
 		}
 	}
